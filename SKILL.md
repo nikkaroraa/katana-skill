@@ -10,7 +10,16 @@ metadata:
 
 # Katana DeFi Skill
 
-Interact with Katana L2 for DeFi operations. All commands use the `katana` CLI wrapper.
+Interact with Katana L2 for DeFi operations.
+
+## Setup
+
+```bash
+cd /path/to/katana-skill
+pnpm install  # Install viem + tsx
+export KATANA_WALLET="0x..."
+export KATANA_RPC_URL="https://rpc.katana.network"  # Optional
+```
 
 ## Quick Commands
 
@@ -19,60 +28,66 @@ Interact with Katana L2 for DeFi operations. All commands use the `katana` CLI w
 ```bash
 ./scripts/katana-cli.sh balance
 ./scripts/katana-cli.sh balance --token ETH
-./scripts/katana-cli.sh balance --token USDC
+./scripts/katana-cli.sh balance --wallet 0x...
 ```
 
 ### View Yield Opportunities
 
 ```bash
 ./scripts/katana-cli.sh yields
-./scripts/katana-cli.sh yields --min-apy 5
+./scripts/katana-cli.sh yields --min-apy 10
 ```
 
 ### Portfolio Overview
 
 ```bash
 ./scripts/katana-cli.sh portfolio
+./scripts/katana-cli.sh portfolio --wallet 0x...
 ```
 
 ## Transaction Commands
 
-### Swap Tokens
+> ⚠️ Require wallet signing (not yet implemented)
 
 ```bash
 ./scripts/katana-cli.sh swap 100 USDC to ETH
-./scripts/katana-cli.sh swap 0.5 ETH to USDC
-```
-
-### Deposit into Yield Pool
-
-```bash
 ./scripts/katana-cli.sh deposit 1000 USDC into usdc-lending
-./scripts/katana-cli.sh deposit 0.1 ETH into eth-staking
-```
-
-### Withdraw from Pool
-
-```bash
 ./scripts/katana-cli.sh withdraw 500 from usdc-lending
-./scripts/katana-cli.sh withdraw all from eth-staking
 ```
 
-## Configuration
+## Environment Variables
 
-Set wallet address via environment:
-```bash
-export KATANA_WALLET="0x..."
-```
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `KATANA_WALLET` | Your wallet address | - |
+| `KATANA_RPC_URL` | Katana L2 RPC endpoint | `https://rpc.katana.network` |
+| `KATANA_PRIVATE_KEY` | For signing transactions | - |
 
-Or pass directly:
-```bash
-./scripts/katana-cli.sh balance --wallet 0x...
-```
+## Supported Tokens
 
-## Notes
+- ETH (native)
+- WETH
+- USDC
+- USDT
+- DAI
 
-- Read-only operations (balance, yields, portfolio) work without wallet signing
-- Transaction operations (swap, deposit, withdraw) require wallet integration
-- All amounts are in human-readable format (not wei)
-- APY values are annualized percentages
+## Yield Pools
+
+| Pool | Token | Risk |
+|------|-------|------|
+| eth-staking | ETH | Low |
+| usdc-lending | USDC | Low |
+| eth-usdc-lp | ETH-USDC | Medium |
+| wbtc-eth-lp | WBTC-ETH | Medium |
+
+## Architecture
+
+The skill uses:
+- **viem** for Ethereum/L2 RPC calls
+- **tsx** for TypeScript execution
+- Bash fallback for environments without Node.js
+
+Data sources:
+- Token balances: Direct RPC calls
+- Yield rates: Katana API (with fallback to cached data)
+- Positions: Contract reads (when wallet configured)

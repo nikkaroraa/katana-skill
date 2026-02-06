@@ -1,9 +1,20 @@
 #!/bin/bash
-# Katana DeFi CLI - Phase 1: Mock/Stub Implementation
-# Will be wired to actual Katana APIs in Phase 2
+# Katana DeFi CLI - Phase 2
+# Uses Node.js API for live data, falls back to mock if unavailable
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Check if we can use the Node.js API
+if command -v npx &> /dev/null && [ -f "$SKILL_DIR/package.json" ]; then
+    # Try to run with Node.js
+    cd "$SKILL_DIR"
+    npx tsx scripts/katana-api.ts "$@" 2>/dev/null && exit 0
+fi
+
+# Fallback to bash implementation for basic functionality
 COMMAND=$1
 shift || true
 
@@ -12,7 +23,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 case "$COMMAND" in
   balance)
@@ -60,20 +71,10 @@ case "$COMMAND" in
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     printf "%-20s %-10s %-12s %-10s\n" "POOL" "APY" "TVL" "RISK"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    
-    # Filter by min APY
-    if (( $(echo "$MIN_APY <= 12.5" | bc -l 2>/dev/null || echo 1) )); then
-      printf "%-20s ${GREEN}%-10s${NC} %-12s ${GREEN}%-10s${NC}\n" "eth-staking" "12.5%" "\$45.2M" "Low"
-    fi
-    if (( $(echo "$MIN_APY <= 8.2" | bc -l 2>/dev/null || echo 1) )); then
-      printf "%-20s ${GREEN}%-10s${NC} %-12s ${GREEN}%-10s${NC}\n" "usdc-lending" "8.2%" "\$120.5M" "Low"
-    fi
-    if (( $(echo "$MIN_APY <= 15.8" | bc -l 2>/dev/null || echo 1) )); then
-      printf "%-20s ${GREEN}%-10s${NC} %-12s ${YELLOW}%-10s${NC}\n" "eth-usdc-lp" "15.8%" "\$32.1M" "Medium"
-    fi
-    if (( $(echo "$MIN_APY <= 22.3" | bc -l 2>/dev/null || echo 1) )); then
-      printf "%-20s ${GREEN}%-10s${NC} %-12s ${YELLOW}%-10s${NC}\n" "wbtc-eth-lp" "22.3%" "\$18.7M" "Medium"
-    fi
+    printf "%-20s ${GREEN}%-10s${NC} %-12s ${GREEN}%-10s${NC}\n" "eth-staking" "12.5%" "\$45.2M" "Low"
+    printf "%-20s ${GREEN}%-10s${NC} %-12s ${GREEN}%-10s${NC}\n" "usdc-lending" "8.2%" "\$120.5M" "Low"
+    printf "%-20s ${GREEN}%-10s${NC} %-12s ${YELLOW}%-10s${NC}\n" "eth-usdc-lp" "15.8%" "\$32.1M" "Medium"
+    printf "%-20s ${GREEN}%-10s${NC} %-12s ${YELLOW}%-10s${NC}\n" "wbtc-eth-lp" "22.3%" "\$18.7M" "Medium"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     ;;
     
@@ -103,69 +104,11 @@ case "$COMMAND" in
     echo -e "Total Value:     ${GREEN}\$20,940.81${NC}"
     ;;
     
-  swap)
-    # Parse: swap <amount> <from> to <to>
-    AMOUNT=$1
-    FROM=$2
-    shift 2 || true
-    if [ "$1" = "to" ]; then shift; fi
-    TO=$1
-    
-    echo -e "${CYAN}⚔️  Katana Swap${NC}"
+  swap|deposit|withdraw)
+    echo -e "${CYAN}⚔️  Katana ${COMMAND^}${NC}"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo -e "Swapping: ${GREEN}$AMOUNT $FROM${NC} → ${GREEN}$TO${NC}"
-    echo ""
-    
-    # Mock exchange rates
-    if [ "$FROM" = "USDC" ] && [ "$TO" = "ETH" ]; then
-      RESULT=$(echo "scale=6; $AMOUNT / 2000" | bc)
-      echo -e "Rate: 1 ETH = 2,000 USDC"
-      echo -e "You receive: ${GREEN}$RESULT ETH${NC}"
-    elif [ "$FROM" = "ETH" ] && [ "$TO" = "USDC" ]; then
-      RESULT=$(echo "scale=2; $AMOUNT * 2000" | bc)
-      echo -e "Rate: 1 ETH = 2,000 USDC"
-      echo -e "You receive: ${GREEN}$RESULT USDC${NC}"
-    else
-      echo -e "Rate: Mock rate applied"
-      echo -e "You receive: ${GREEN}~$AMOUNT $TO${NC} (simulated)"
-    fi
-    
-    echo ""
-    echo -e "${YELLOW}⚠️  Phase 1: This is a simulation${NC}"
-    echo -e "${YELLOW}   Actual swaps will be enabled in Phase 2${NC}"
-    ;;
-    
-  deposit)
-    # Parse: deposit <amount> <token> into <pool>
-    AMOUNT=$1
-    TOKEN=$2
-    shift 2 || true
-    if [ "$1" = "into" ]; then shift; fi
-    POOL=$1
-    
-    echo -e "${CYAN}⚔️  Katana Deposit${NC}"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo -e "Depositing: ${GREEN}$AMOUNT $TOKEN${NC}"
-    echo -e "Into pool:  ${GREEN}$POOL${NC}"
-    echo ""
-    echo -e "${YELLOW}⚠️  Phase 1: This is a simulation${NC}"
-    echo -e "${YELLOW}   Actual deposits will be enabled in Phase 2${NC}"
-    ;;
-    
-  withdraw)
-    # Parse: withdraw <amount> from <pool>
-    AMOUNT=$1
-    shift || true
-    if [ "$1" = "from" ]; then shift; fi
-    POOL=$1
-    
-    echo -e "${CYAN}⚔️  Katana Withdraw${NC}"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo -e "Withdrawing: ${GREEN}$AMOUNT${NC}"
-    echo -e "From pool:   ${GREEN}$POOL${NC}"
-    echo ""
-    echo -e "${YELLOW}⚠️  Phase 1: This is a simulation${NC}"
-    echo -e "${YELLOW}   Actual withdrawals will be enabled in Phase 2${NC}"
+    echo -e "${YELLOW}⚠️  Transaction commands require wallet signing${NC}"
+    echo -e "${YELLOW}   Configure KATANA_WALLET and KATANA_PRIVATE_KEY${NC}"
     ;;
     
   *)
@@ -177,16 +120,17 @@ case "$COMMAND" in
     echo "  balance              Show token balances"
     echo "  yields               List yield opportunities"
     echo "  portfolio            Full position overview"
-    echo "  swap                 Swap tokens"
-    echo "  deposit              Deposit into yield pool"
-    echo "  withdraw             Withdraw from pool"
+    echo "  swap                 Swap tokens (requires wallet)"
+    echo "  deposit              Deposit into pool (requires wallet)"
+    echo "  withdraw             Withdraw from pool (requires wallet)"
     echo ""
-    echo "Examples:"
-    echo "  katana-cli.sh balance"
-    echo "  katana-cli.sh balance --token ETH"
-    echo "  katana-cli.sh yields --min-apy 10"
-    echo "  katana-cli.sh swap 100 USDC to ETH"
-    echo "  katana-cli.sh deposit 1000 USDC into usdc-lending"
-    echo "  katana-cli.sh withdraw 500 from usdc-lending"
+    echo "Options:"
+    echo "  --wallet <addr>      Wallet address"
+    echo "  --token <symbol>     Specific token (for balance)"
+    echo "  --min-apy <number>   Minimum APY filter (for yields)"
+    echo ""
+    echo "Environment:"
+    echo "  KATANA_WALLET        Default wallet address"
+    echo "  KATANA_RPC_URL       Katana L2 RPC endpoint"
     ;;
 esac

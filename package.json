@@ -1,0 +1,18 @@
+{
+	"name": "katana-skill",
+	"version": "2.0.0",
+	"description": "Katana DeFi operations skill for OpenClaw",
+	"type": "module",
+	"scripts": {
+		"balance": "npx tsx scripts/katana-api.ts balance",
+		"yields": "npx tsx scripts/katana-api.ts yields",
+		"portfolio": "npx tsx scripts/katana-api.ts portfolio"
+	},
+	"dependencies": {
+		"viem": "^2.0.0"
+	},
+	"devDependencies": {
+		"tsx": "^4.0.0",
+		"typescript": "^5.0.0"
+	}
+}
