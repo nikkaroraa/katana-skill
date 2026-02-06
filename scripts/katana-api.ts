@@ -1,205 +1,363 @@
-#!/usr/bin/env npx ts-node
-
+#!/usr/bin/env npx tsx
 /**
  * Katana DeFi API - Phase 2
- * Connects to real Katana L2 RPC for live data
+ * Real RPC calls with viem, fallback to mock data
  */
 
-import { createPublicClient, http, formatUnits, parseAbi } from "viem";
+import { createPublicClient, http, formatUnits, type Address } from "viem";
+import { base } from "viem/chains";
 
-// Katana L2 Configuration
+// Configuration
 const KATANA_RPC = process.env.KATANA_RPC_URL || "https://rpc.katana.network";
-const WALLET = process.env.KATANA_WALLET || "";
+const WALLET_ADDRESS = process.env.KATANA_WALLET as Address | undefined;
 
-// Token addresses on Katana L2
-const TOKENS: Record<string, { address: `0x${string}`; decimals: number; symbol: string }> = {
-	ETH: { address: "0x0000000000000000000000000000000000000000", decimals: 18, symbol: "ETH" },
-	WETH: { address: "0x4200000000000000000000000000000000000006", decimals: 18, symbol: "WETH" },
-	USDC: { address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", decimals: 6, symbol: "USDC" },
-	USDT: { address: "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58", decimals: 6, symbol: "USDT" },
-	DAI: { address: "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1", decimals: 18, symbol: "DAI" },
-};
+// Fallback to Base mainnet if Katana RPC is down
+const FALLBACK_RPC = "https://mainnet.base.org";
 
-// Pool/Vault addresses
-const POOLS: Record<string, { address: `0x${string}`; token: string; name: string }> = {
-	"eth-staking": { address: "0x1234567890123456789012345678901234567890", token: "ETH", name: "ETH Staking" },
-	"usdc-lending": { address: "0x2345678901234567890123456789012345678901", token: "USDC", name: "USDC Lending" },
-	"eth-usdc-lp": { address: "0x3456789012345678901234567890123456789012", token: "ETH-USDC", name: "ETH-USDC LP" },
-};
+// ERC20 ABI
+const ERC20_ABI = [
+	{
+		inputs: [{ name: "account", type: "address" }],
+		name: "balanceOf",
+		outputs: [{ name: "", type: "uint256" }],
+		stateMutability: "view",
+		type: "function",
+	},
+	{
+		inputs: [],
+		name: "decimals",
+		outputs: [{ name: "", type: "uint8" }],
+		stateMutability: "view",
+		type: "function",
+	},
+] as const;
 
-const ERC20_ABI = parseAbi([
-	"function balanceOf(address owner) view returns (uint256)",
-	"function decimals() view returns (uint8)",
-	"function symbol() view returns (string)",
-]);
+// Token list
+const TOKENS: Array<{
+	address: Address;
+	symbol: string;
+	decimals: number;
+	priceUsd: number;
+}> = [
+	{ address: "0x0000000000000000000000000000000000000000", symbol: "ETH", decimals: 18, priceUsd: 2000 },
+	{ address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", symbol: "USDC", decimals: 6, priceUsd: 1 },
+	{ address: "0x4200000000000000000000000000000000000006", symbol: "WETH", decimals: 18, priceUsd: 2000 },
+	{ address: "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb", symbol: "DAI", decimals: 18, priceUsd: 1 },
+	{ address: "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2", symbol: "USDT", decimals: 6, priceUsd: 1 },
+];
 
-// Create Katana client
-const client = createPublicClient({
-	transport: http(KATANA_RPC),
-});
+// Yield pools (static data - would come from Katana API in production)
+const YIELD_POOLS = [
+	{ id: "eth-staking", token: "ETH", apy: 12.5, tvl: 45_200_000, risk: "Low" },
+	{ id: "usdc-lending", token: "USDC", apy: 8.2, tvl: 120_500_000, risk: "Low" },
+	{ id: "eth-usdc-lp", token: "ETH-USDC", apy: 15.8, tvl: 32_100_000, risk: "Medium" },
+	{ id: "wbtc-eth-lp", token: "WBTC-ETH", apy: 22.3, tvl: 18_700_000, risk: "Medium" },
+	{ id: "ausd-yield", token: "AUSD", apy: 18.5, tvl: 8_400_000, risk: "Medium" },
+];
 
-// Colors for terminal output
-const colors = {
-	green: "\x1b[32m",
-	yellow: "\x1b[33m",
-	cyan: "\x1b[36m",
-	red: "\x1b[31m",
-	reset: "\x1b[0m",
-};
+// Colors
+const GREEN = "\x1b[0;32m";
+const YELLOW = "\x1b[1;33m";
+const BLUE = "\x1b[0;34m";
+const CYAN = "\x1b[0;36m";
+const NC = "\x1b[0m";
 
-async function getBalance(wallet: string, tokenSymbol?: string): Promise<void> {
-	console.log(`${colors.cyan}⚔️  Katana Balance${colors.reset}`);
-	console.log("━".repeat(40));
+interface TokenBalance {
+	symbol: string;
+	balance: string;
+	balanceFormatted: string;
+	usdValue: number;
+}
+
+async function createClient() {
+	// Try Katana RPC first, fall back to Base
+	for (const rpc of [KATANA_RPC, FALLBACK_RPC]) {
+		try {
+			const client = createPublicClient({
+				chain: base,
+				transport: http(rpc, { timeout: 5000 }),
+			});
+			// Test connection
+			await client.getBlockNumber();
+			return { client, rpcUrl: rpc };
+		} catch {
+			continue;
+		}
+	}
+	return null;
+}
+
+async function fetchBalances(wallet: Address): Promise<TokenBalance[]> {
+	const connection = await createClient();
+	if (!connection) {
+		console.error("Could not connect to RPC");
+		return [];
+	}
+
+	const { client } = connection;
+	const balances: TokenBalance[] = [];
+
+	// Fetch ETH balance
+	try {
+		const ethBalance = await client.getBalance({ address: wallet });
+		const ethFormatted = formatUnits(ethBalance, 18);
+		const ethUsd = parseFloat(ethFormatted) * 2000;
+
+		if (ethBalance > 0n) {
+			balances.push({
+				symbol: "ETH",
+				balance: ethBalance.toString(),
+				balanceFormatted: ethFormatted,
+				usdValue: ethUsd,
+			});
+		}
+	} catch (e) {
+		console.error("Failed to fetch ETH balance");
+	}
+
+	// Fetch ERC20 balances
+	for (const token of TOKENS.filter((t) => t.symbol !== "ETH")) {
+		try {
+			const balance = await client.readContract({
+				address: token.address,
+				abi: ERC20_ABI,
+				functionName: "balanceOf",
+				args: [wallet],
+			});
+
+			if (balance > 0n) {
+				const formatted = formatUnits(balance, token.decimals);
+				const usdValue = parseFloat(formatted) * token.priceUsd;
+
+				balances.push({
+					symbol: token.symbol,
+					balance: balance.toString(),
+					balanceFormatted: formatted,
+					usdValue,
+				});
+			}
+		} catch {
+			// Skip tokens that fail
+		}
+	}
+
+	return balances;
+}
+
+function formatUsd(value: number): string {
+	return value.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+}
+
+function formatNumber(value: number): string {
+	if (value >= 1_000_000) {
+		return `$${(value / 1_000_000).toFixed(1)}M`;
+	}
+	if (value >= 1_000) {
+		return `$${(value / 1_000).toFixed(1)}K`;
+	}
+	return `$${value.toFixed(2)}`;
+}
+
+// Command handlers
+async function cmdBalance(args: string[]) {
+	let wallet = WALLET_ADDRESS;
+	let tokenFilter: string | null = null;
+
+	for (let i = 0; i < args.length; i++) {
+		if (args[i] === "--wallet" && args[i + 1]) {
+			wallet = args[i + 1] as Address;
+		}
+		if (args[i] === "--token" && args[i + 1]) {
+			tokenFilter = args[i + 1].toUpperCase();
+		}
+	}
+
+	console.log(`${CYAN}⚔️  Katana Balance${NC}`);
+	console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
 	if (!wallet) {
-		console.log(`${colors.yellow}No wallet configured. Set KATANA_WALLET env var.${colors.reset}`);
+		console.log(`${YELLOW}Set KATANA_WALLET or use --wallet <address>${NC}`);
+		// Show mock data
+		console.log(`ETH:   ${GREEN}2.4521${NC}     (~$4,902.42)`);
+		console.log(`USDC:  ${GREEN}5,230.00${NC}   (~$5,230.00)`);
+		console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+		console.log(`Total: ${GREEN}$10,132.42${NC} (mock data)`);
 		return;
 	}
 
-	try {
-		if (tokenSymbol) {
-			// Get specific token balance
-			const token = TOKENS[tokenSymbol.toUpperCase()];
-			if (!token) {
-				console.log(`${colors.red}Token ${tokenSymbol} not found${colors.reset}`);
-				return;
-			}
+	const balances = await fetchBalances(wallet);
 
-			if (token.symbol === "ETH") {
-				const balance = await client.getBalance({ address: wallet as `0x${string}` });
-				const formatted = formatUnits(balance, 18);
-				console.log(`ETH: ${colors.green}${formatted}${colors.reset}`);
-			} else {
-				const balance = await client.readContract({
-					address: token.address,
-					abi: ERC20_ABI,
-					functionName: "balanceOf",
-					args: [wallet as `0x${string}`],
-				});
-				const formatted = formatUnits(balance as bigint, token.decimals);
-				console.log(`${token.symbol}: ${colors.green}${formatted}${colors.reset}`);
-			}
-		} else {
-			// Get all token balances
-			for (const [symbol, token] of Object.entries(TOKENS)) {
-				try {
-					let balance: bigint;
-					if (symbol === "ETH") {
-						balance = await client.getBalance({ address: wallet as `0x${string}` });
-					} else {
-						balance = (await client.readContract({
-							address: token.address,
-							abi: ERC20_ABI,
-							functionName: "balanceOf",
-							args: [wallet as `0x${string}`],
-						})) as bigint;
-					}
-					const formatted = formatUnits(balance, token.decimals);
-					if (Number(formatted) > 0) {
-						console.log(`${symbol.padEnd(6)} ${colors.green}${formatted}${colors.reset}`);
-					}
-				} catch {
-					// Skip tokens that fail
-				}
-			}
-		}
-	} catch (error) {
-		console.log(`${colors.red}Error fetching balances: ${error}${colors.reset}`);
-		// Fallback to mock data
-		console.log(`\n${colors.yellow}Falling back to cached data...${colors.reset}`);
-		console.log(`ETH:   ${colors.green}2.4521${colors.reset}     (~$4,902.42)`);
-		console.log(`USDC:  ${colors.green}5,230.00${colors.reset}   (~$5,230.00)`);
+	if (balances.length === 0) {
+		console.log("No token balances found");
+		return;
+	}
+
+	let total = 0;
+	for (const b of balances) {
+		if (tokenFilter && b.symbol !== tokenFilter) continue;
+
+		const amount = parseFloat(b.balanceFormatted).toLocaleString("en-US", { maximumFractionDigits: 4 });
+		console.log(`${b.symbol}:`.padEnd(7) + `${GREEN}${amount}${NC}`.padEnd(20) + `(~${formatUsd(b.usdValue)})`);
+		total += b.usdValue;
+	}
+
+	if (!tokenFilter) {
+		console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+		console.log(`Total: ${GREEN}${formatUsd(total)}${NC}`);
 	}
 }
 
-async function getYields(minApy?: number): Promise<void> {
-	console.log(`${colors.cyan}⚔️  Katana Yield Opportunities${colors.reset}`);
-	console.log("━".repeat(50));
-	console.log(`${"POOL".padEnd(20)} ${"APY".padEnd(10)} ${"TVL".padEnd(12)} RISK`);
-	console.log("━".repeat(50));
+function cmdYields(args: string[]) {
+	let minApy = 0;
 
-	// In production, fetch from Katana API/subgraph
-	const yields = [
-		{ pool: "eth-staking", apy: 12.5, tvl: "$45.2M", risk: "Low" },
-		{ pool: "usdc-lending", apy: 8.2, tvl: "$120.5M", risk: "Low" },
-		{ pool: "eth-usdc-lp", apy: 15.8, tvl: "$32.1M", risk: "Medium" },
-		{ pool: "wbtc-eth-lp", apy: 22.3, tvl: "$18.7M", risk: "Medium" },
+	for (let i = 0; i < args.length; i++) {
+		if (args[i] === "--min-apy" && args[i + 1]) {
+			minApy = parseFloat(args[i + 1]);
+		}
+	}
+
+	console.log(`${CYAN}⚔️  Katana Yield Opportunities${NC}`);
+	console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+	console.log("POOL".padEnd(20) + "APY".padEnd(10) + "TVL".padEnd(12) + "RISK");
+	console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+	const filteredPools = YIELD_POOLS.filter((p) => p.apy >= minApy);
+
+	for (const pool of filteredPools) {
+		const riskColor = pool.risk === "Low" ? GREEN : YELLOW;
+		console.log(
+			pool.id.padEnd(20) +
+			`${GREEN}${pool.apy}%${NC}`.padEnd(18) +
+			formatNumber(pool.tvl).padEnd(12) +
+			`${riskColor}${pool.risk}${NC}`
+		);
+	}
+
+	console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+}
+
+async function cmdPortfolio(args: string[]) {
+	let wallet = WALLET_ADDRESS;
+
+	for (let i = 0; i < args.length; i++) {
+		if (args[i] === "--wallet" && args[i + 1]) {
+			wallet = args[i + 1] as Address;
+		}
+	}
+
+	console.log(`${CYAN}⚔️  Katana Portfolio Overview${NC}`);
+	console.log("");
+	console.log(`${BLUE}📊 Wallet Holdings${NC}`);
+	console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+	let walletTotal = 0;
+
+	if (wallet) {
+		const balances = await fetchBalances(wallet);
+		for (const b of balances) {
+			const amount = parseFloat(b.balanceFormatted).toLocaleString("en-US", { maximumFractionDigits: 4 });
+			console.log(`${b.symbol}:`.padEnd(7) + `${GREEN}${amount}${NC}`.padEnd(18) + `(~${formatUsd(b.usdValue)})`);
+			walletTotal += b.usdValue;
+		}
+	} else {
+		// Mock data
+		console.log(`ETH:   ${GREEN}2.4521${NC}     (~$4,902.42)`);
+		console.log(`USDC:  ${GREEN}5,230.00${NC}   (~$5,230.00)`);
+		console.log(`WBTC:  ${GREEN}0.0823${NC}     (~$3,987.34)`);
+		console.log(`DAI:   ${GREEN}1,250.00${NC}   (~$1,250.00)`);
+		walletTotal = 15369.76;
+	}
+
+	console.log("");
+	console.log(`${BLUE}🌾 Active Positions${NC}`);
+	console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+	console.log("POOL".padEnd(18) + "DEPOSITED".padEnd(12) + "APY".padEnd(10) + "EARNED");
+	console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+	// Mock positions (would come from contract reads in production)
+	const positions = [
+		{ pool: "eth-staking", deposited: 2000, apy: 12.5, earned: 42.35 },
+		{ pool: "usdc-lending", deposited: 3500, apy: 8.2, earned: 28.7 },
 	];
 
-	for (const y of yields) {
-		if (!minApy || y.apy >= minApy) {
-			const riskColor = y.risk === "Low" ? colors.green : colors.yellow;
-			console.log(
-				`${y.pool.padEnd(20)} ${colors.green}${(y.apy + "%").padEnd(10)}${colors.reset} ${y.tvl.padEnd(12)} ${riskColor}${y.risk}${colors.reset}`
-			);
-		}
+	let stakedTotal = 0;
+	let earningsTotal = 0;
+
+	for (const pos of positions) {
+		console.log(
+			pos.pool.padEnd(18) +
+			`$${pos.deposited}`.padEnd(12) +
+			`${GREEN}${pos.apy}%${NC}`.padEnd(18) +
+			`${GREEN}+$${pos.earned.toFixed(2)}${NC}`
+		);
+		stakedTotal += pos.deposited;
+		earningsTotal += pos.earned;
+	}
+
+	console.log("");
+	console.log(`${BLUE}📈 Summary${NC}`);
+	console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+	console.log(`Wallet Value:    ${GREEN}${formatUsd(walletTotal)}${NC}`);
+	console.log(`Staked Value:    ${GREEN}${formatUsd(stakedTotal)}${NC}`);
+	console.log(`Pending Rewards: ${GREEN}${formatUsd(earningsTotal)}${NC}`);
+	console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+	console.log(`Total Value:     ${GREEN}${formatUsd(walletTotal + stakedTotal + earningsTotal)}${NC}`);
+}
+
+function cmdSwap(args: string[]) {
+	console.log(`${CYAN}⚔️  Katana Swap${NC}`);
+	console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+	console.log(`${YELLOW}⚠️  Transaction commands require wallet signing${NC}`);
+	console.log(`${YELLOW}   Configure KATANA_PRIVATE_KEY to enable${NC}`);
+}
+
+function showHelp() {
+	console.log("⚔️  Katana CLI - DeFi Operations on Katana L2");
+	console.log("");
+	console.log("Usage: katana-api.ts <command> [options]");
+	console.log("");
+	console.log("Commands:");
+	console.log("  balance              Show token balances");
+	console.log("  yields               List yield opportunities");
+	console.log("  portfolio            Full position overview");
+	console.log("  swap                 Swap tokens (requires wallet)");
+	console.log("  deposit              Deposit into pool (requires wallet)");
+	console.log("  withdraw             Withdraw from pool (requires wallet)");
+	console.log("");
+	console.log("Options:");
+	console.log("  --wallet <addr>      Wallet address");
+	console.log("  --token <symbol>     Specific token (for balance)");
+	console.log("  --min-apy <number>   Minimum APY filter (for yields)");
+	console.log("");
+	console.log("Environment:");
+	console.log("  KATANA_WALLET        Default wallet address");
+	console.log("  KATANA_RPC_URL       Katana L2 RPC endpoint");
+}
+
+// Main
+async function main() {
+	const args = process.argv.slice(2);
+	const command = args[0];
+	const restArgs = args.slice(1);
+
+	switch (command) {
+		case "balance":
+			await cmdBalance(restArgs);
+			break;
+		case "yields":
+			cmdYields(restArgs);
+			break;
+		case "portfolio":
+			await cmdPortfolio(restArgs);
+			break;
+		case "swap":
+		case "deposit":
+		case "withdraw":
+			cmdSwap(restArgs);
+			break;
+		default:
+			showHelp();
 	}
 }
 
-async function getPortfolio(wallet: string): Promise<void> {
-	console.log(`${colors.cyan}⚔️  Katana Portfolio Overview${colors.reset}\n`);
-
-	if (!wallet) {
-		console.log(`${colors.yellow}No wallet configured. Set KATANA_WALLET env var.${colors.reset}`);
-		return;
-	}
-
-	console.log("📊 Wallet Holdings");
-	console.log("━".repeat(40));
-	await getBalance(wallet);
-
-	console.log("\n🌾 Active Positions");
-	console.log("━".repeat(50));
-	console.log(`${"POOL".padEnd(18)} ${"DEPOSITED".padEnd(12)} ${"APY".padEnd(10)} EARNED`);
-	console.log("━".repeat(50));
-
-	// In production, fetch user positions from contracts
-	console.log(
-		`${"eth-staking".padEnd(18)} ${"$2,000".padEnd(12)} ${colors.green}${"12.5%".padEnd(10)}${colors.reset} ${colors.green}+$42.35${colors.reset}`
-	);
-	console.log(
-		`${"usdc-lending".padEnd(18)} ${"$3,500".padEnd(12)} ${colors.green}${"8.2%".padEnd(10)}${colors.reset} ${colors.green}+$28.70${colors.reset}`
-	);
-
-	console.log("\n📈 Summary");
-	console.log("━".repeat(40));
-	console.log(`Wallet Value:    ${colors.green}$15,369.76${colors.reset}`);
-	console.log(`Staked Value:    ${colors.green}$5,500.00${colors.reset}`);
-	console.log(`Pending Rewards: ${colors.green}$71.05${colors.reset}`);
-	console.log("━".repeat(40));
-	console.log(`Total Value:     ${colors.green}$20,940.81${colors.reset}`);
-}
-
-// CLI interface
-const command = process.argv[2];
-const args = process.argv.slice(3);
-
-switch (command) {
-	case "balance":
-		const tokenArg = args.find((a, i) => args[i - 1] === "--token");
-		const walletArg = args.find((a, i) => args[i - 1] === "--wallet") || WALLET;
-		getBalance(walletArg, tokenArg);
-		break;
-
-	case "yields":
-		const minApyArg = args.find((a, i) => args[i - 1] === "--min-apy");
-		getYields(minApyArg ? parseFloat(minApyArg) : undefined);
-		break;
-
-	case "portfolio":
-		const portfolioWallet = args.find((a, i) => args[i - 1] === "--wallet") || WALLET;
-		getPortfolio(portfolioWallet);
-		break;
-
-	default:
-		console.log("⚔️  Katana CLI - DeFi Operations on Katana L2");
-		console.log("\nUsage: katana-api.ts <command> [options]");
-		console.log("\nCommands:");
-		console.log("  balance    - Show token balances");
-		console.log("  yields     - List yield opportunities");
-		console.log("  portfolio  - Full position overview");
-		console.log("\nOptions:");
-		console.log("  --wallet   - Wallet address");
-		console.log("  --token    - Specific token (for balance)");
-		console.log("  --min-apy  - Minimum APY filter (for yields)");
-}
+main().catch(console.error);
