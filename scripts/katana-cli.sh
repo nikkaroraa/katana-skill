@@ -104,11 +104,19 @@ case "$COMMAND" in
     echo -e "Total Value:     ${GREEN}\$20,940.81${NC}"
     ;;
     
+  info)
+    echo -e "${CYAN}⚔️  Katana Network Info${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo -e "Chain ID:     ${BLUE}747474${NC}"
+    echo "RPC:          https://rpc.katana.network"
+    echo "Explorer:     https://katanascan.com"
+    ;;
+    
   swap|deposit|withdraw)
     echo -e "${CYAN}⚔️  Katana ${COMMAND^}${NC}"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo -e "${YELLOW}⚠️  Transaction commands require wallet signing${NC}"
-    echo -e "${YELLOW}   Configure KATANA_WALLET and KATANA_PRIVATE_KEY${NC}"
+    echo -e "${YELLOW}   Use Sushi UI: https://www.sushi.com/swap?chainId=747474${NC}"
     ;;
     
   *)

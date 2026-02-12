@@ -10,18 +10,30 @@ metadata:
 
 # Katana DeFi Skill
 
-Interact with Katana L2 for DeFi operations.
+Interact with Katana L2 (Chain ID: 747474) for DeFi operations.
+
+## Network Info
+
+- **Chain ID:** 747474
+- **RPC:** https://rpc.katana.network
+- **Explorer:** https://katanascan.com
+- **Core Protocols:** Sushi (DEX), Morpho (Lending), Yearn (Vaults), Agora (AUSD)
 
 ## Setup
 
 ```bash
-cd /path/to/katana-skill
+cd ~/.openclaw/skills/katana
 pnpm install  # Install viem + tsx
-export KATANA_WALLET="0x..."
-export KATANA_RPC_URL="https://rpc.katana.network"  # Optional
+export KATANA_WALLET="0x..."  # Your wallet address
 ```
 
 ## Quick Commands
+
+### Network Status
+
+```bash
+./scripts/katana-cli.sh info
+```
 
 ### Check Token Balances
 
@@ -45,49 +57,60 @@ export KATANA_RPC_URL="https://rpc.katana.network"  # Optional
 ./scripts/katana-cli.sh portfolio --wallet 0x...
 ```
 
-## Transaction Commands
+## Supported Tokens
 
-> ⚠️ Require wallet signing (not yet implemented)
+| Token | Address | Decimals |
+|-------|---------|----------|
+| ETH | Native | 18 |
+| WETH | 0xee7d...ab62 | 18 |
+| USDC | 0x203a...0d36 | 6 |
+| USDT | 0x2dca...d2f2 | 6 |
+| AUSD | 0x0000...012a | 18 |
+| WBTC | 0x0913...2cf52 | 8 |
+| wstETH | 0x7fb4...5c8c | 18 |
+| weETH | 0x9893...c19a7 | 18 |
+| KAT | 0x7f1f...dc2d | 18 |
+| MORPHO | 0x1e5e...e4e | 18 |
 
-```bash
-./scripts/katana-cli.sh swap 100 USDC to ETH
-./scripts/katana-cli.sh deposit 1000 USDC into usdc-lending
-./scripts/katana-cli.sh withdraw 500 from usdc-lending
-```
+## Core Contracts
+
+| Protocol | Contract | Address |
+|----------|----------|---------|
+| Sushi V3 Router | DEX | 0x4e1d...376c |
+| Sushi RouteProcessor | Aggregator | 0x3ced...4c14c |
+| Morpho Blue | Lending | 0xd50f...8abc |
+| MetaMorpho Factory | Vaults | 0xd3f3...904b |
+| Unified Bridge | Bridge | 0x2a3d...2ede |
 
 ## Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `KATANA_WALLET` | Your wallet address | - |
-| `KATANA_RPC_URL` | Katana L2 RPC endpoint | `https://rpc.katana.network` |
-| `KATANA_PRIVATE_KEY` | For signing transactions | - |
-
-## Supported Tokens
-
-- ETH (native)
-- WETH
-- USDC
-- USDT
-- DAI
-
-## Yield Pools
-
-| Pool | Token | Risk |
-|------|-------|------|
-| eth-staking | ETH | Low |
-| usdc-lending | USDC | Low |
-| eth-usdc-lp | ETH-USDC | Medium |
-| wbtc-eth-lp | WBTC-ETH | Medium |
+| `KATANA_RPC_URL` | Custom RPC endpoint | `https://rpc.katana.network` |
+| `KATANA_PRIVATE_KEY` | For signing (future) | - |
 
 ## Architecture
 
 The skill uses:
-- **viem** for Ethereum/L2 RPC calls
+- **viem** for RPC calls to Katana L2
 - **tsx** for TypeScript execution
 - Bash fallback for environments without Node.js
 
 Data sources:
-- Token balances: Direct RPC calls
-- Yield rates: Katana API (with fallback to cached data)
-- Positions: Contract reads (when wallet configured)
+- Token balances: Live RPC calls (✅ Phase 3)
+- Yield rates: Estimated (TODO: Morpho API)
+- Positions: Coming soon (TODO: Contract reads)
+
+## Transaction Commands
+
+> ⚠️ Transaction signing not yet implemented
+
+For swaps, use Sushi directly:
+https://www.sushi.com/swap?chainId=747474
+
+## Related Links
+
+- [Katana Docs](https://docs.katana.network)
+- [KatanaScan](https://katanascan.com)
+- [Sushi on Katana](https://www.sushi.com/swap?chainId=747474)
